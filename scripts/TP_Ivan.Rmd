@@ -1,0 +1,99 @@
+---
+title: "TP - Ivan"
+output: html_notebook
+---
+
+# Intro
+Se arma este notebook para la resolucion del primer TP de la meteria de modelado estadistico para ciencia de datos. El TP cuenta con 10 ejercicios. Los mismos pueden verse aca 
+
+# Sobre el tp
+Vamos a utilizar un conjunto de datos correspondiente a una encuesta con una escala tipo Likert. Es decir, se pide al encuestado marcar un número entero del 1 al 5, donde 1 significa Totalmente en desacuerdo y 5, Totalmente de acuerdo. La encuesta consta de 44 preguntas muy diversas, como por ejemplo: “Disfruto de bailar” o “Creo que un desastre climático podría llegar a ser divertido”.
+
+Además, para cada persona encuestada se cuenta con variables adicionales que podrían ser de interés, como edad, género, religión, entre otras. Los datos se encuentran en el archivo encuesta.csv, y el archivo codebook.txt contiene una descripción detallada de las preguntas y de las variables adicionales.
+
+# Librerias
+
+```{r}
+install.packages("rsample")   # if not already installed
+library(tidyverse)
+library(rsample)
+```
+
+# Ejercicio 1 - Dividir el conjunto de data en entramiento y testeo
+
+```{r}
+df <- read_delim("data/data.csv",delim= "\t")
+glimpse(df)
+```
+```{r}
+likert_cols <- paste0("Q", 1:44)
+
+df <- df %>%
+  mutate(across(all_of(likert_cols), ~ factor(., levels = 1:5, ordered = TRUE)))
+```
+
+```{r}
+set.seed(123)
+split <- initial_split(df,prop = 0.3)
+
+train_data <- training(split)
+test_data <- testing(split)
+
+```
+
+
+# Ejercicio 2 - Elegir una pregunta que me parezca interesante
+Vamos a quedarnos en principcio con la pregunta _Q1_ " _I have studied how to win at gambling_".
+
+# Ejercicio 3
+Si quisieramos modelar la respuesta a esta pregunta en funcion de la edad y el genero ¿ Habria algun problema en usar una regresion lineal?
+En mi corto conocimiento, no podemos usar una regresion lineal ya que lo que estamos tratando de predecir en este caso es una variable ordinal, es decir que ademas de que lo que estamos prediciendo es la clasificacion de una respuesta, ademas la misma posee un orden (del 1 al 5).
+
+# Ejercicio 4
+El modelo de *regresion ordinal* es un modelo en el cual la variable predicha $Y$ es un grupo ordenado de categorias $\{1,2,3, ..., K \} donde no se conoce la distancia entre categorias pero se sabe que estan ordenadas.
+
+# Ejercicio 5
+
+```{r}
+library(MASS)
+clean_data_Q2 <- train_data[
+  complete.cases(train_data$age, train_data$Q2)   & 
+  is.finite(train_data$age), 
+]
+
+Q2_model <- polr(Q2 ~ age,data= clean_data_Q2,method = "logistic",Hess = TRUE) 
+Q2_model
+```
+No estoy muy convencido de lo que me esta dando jaja
+
+# Ejercicio 6 - Estimar la proba de que alguien de al menos 25 años este al menos de acuerdo con la frase "me gustan las armas " (Q9)
+
+```{r}
+library(MASS)
+clean_data_Q9 <- train_data[
+  complete.cases(train_data$age, train_data$Q9)   & 
+  is.finite(train_data$age), 
+]
+
+Q9_model <- polr(Q9 ~ age,data= clean_data_Q9,method = "logistic",Hess = TRUE) 
+Q9_model
+```
+```{r}
+test <- data.frame(age = 25)
+probs <- predict(Q9_model, test,type = "prob")
+print(probs)
+p_at_least_like <-  sum(probs[c(4,5)])
+cat("P(Q2 ≥ 4 | age=8) =", p_at_least_like, "\n")
+
+```
+# Ejercicio 7 
+```{r}
+loss_function <- function(predichos, reales) {
+  pred_num <- as.numeric(as.character(predichos)) #convierto los factores ordenados a numericos
+  real_num <- as.numeric(as.character(reales))
+  n <- length(real_num)
+  res <- sum(abs(pred_num - real_num)) / n
+  return(res)
+}
+```
+
