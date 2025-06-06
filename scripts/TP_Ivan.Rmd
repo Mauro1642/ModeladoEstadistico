@@ -22,22 +22,26 @@ library(rsample)
 # Ejercicio 1 - Dividir el conjunto de data en entramiento y testeo
 
 ```{r}
-df <- read_delim("data/data.csv",delim= "\t")
+# Leemos el dataset
+df <- read_delim("../data/data.csv",delim= "\t")
 glimpse(df)
 ```
 ```{r}
+# Transformamos de antemano todas las preguntas a un factor ordenado con niveles de 1 al 5 para poder luego aplicar la regresion ordinal
 likert_cols <- paste0("Q", 1:44)
-
 df <- df %>%
   mutate(across(all_of(likert_cols), ~ factor(., levels = 1:5, ordered = TRUE)))
 ```
 
 ```{r}
+# Se setea una seed para reproducibilidad.
 set.seed(123)
-split <- initial_split(df,prop = 0.3)
+split <- initial_split(df,prop = 0.7)
 
 train_data <- training(split)
 test_data <- testing(split)
+
+test_data
 
 ```
 
@@ -89,11 +93,138 @@ cat("P(Q2 ≥ 4 | age=8) =", p_at_least_like, "\n")
 # Ejercicio 7 
 ```{r}
 loss_function <- function(predichos, reales) {
-  pred_num <- as.numeric(as.character(predichos)) #convierto los factores ordenados a numericos
+  # Convertir factores ordenados a numéricos, si corresponde
+  pred_num <- as.numeric(as.character(predichos))
   real_num <- as.numeric(as.character(reales))
-  n <- length(real_num)
-  res <- sum(abs(pred_num - real_num)) / n
+  
+  # Filtrar sólo los casos donde ambos no son NA
+  validados <- !is.na(pred_num) & !is.na(real_num)
+  pred_num <- pred_num[validados]
+  real_num <- real_num[validados]
+  
+  # Si no queda ningún par válido, devolvemos 0 (o NA_real_ si preferís indicarlo como "sin dato")
+  if (length(real_num) == 0) {
+    return(0) 
+    # Si querés devolver NA en vez de 0 cuando no hay datos, usá:
+    # return(NA_real_)
+  }
+  
+  # Calcular la distancia media absoluta
+  res <- mean(abs(pred_num - real_num))
   return(res)
 }
 ```
+# Ejercicio 8
+```{r}
+clean_data_Q2_test <- test_data[
+  complete.cases(test_data$age, test_data$Q2)   & 
+  is.finite(test_data$age), 
+]
+clean_data_Q2
+```
+
+
+
+```{r}
+train_data$Q2 <- as.numeric(as.character(train_data$Q2))
+test_data$Q2 <- as.numeric(as.character(test_data$Q2))
+
+
+modelo_lineal <- lm(Q2 ~ age, data = train_data)
+#predigo para el modelo lineal
+predicciones_continuas <- predict(modelo_lineal, newdata = test_data)
+predicciones_finales <- pmin(pmax(round(predicciones_continuas), 1), 5)
+predicciones_finales
+```
+```{r}
+L_linear<-loss_function(predicciones_finales,test_data$Q2)
+#predigo para el modelo ordinal
+predicciones_ordinal<-predict(Q2_model,newdata=test_data)
+L_ordinal<-loss_function(predicciones_ordinal,test_data$Q2)
+predicciones_ordinal
+```
+```{r}
+L_linear
+L_ordinal
+```
+```{r}
+# ——————————————————————————————————————————————————————————————
+# Ejercicio: dos priors distintos usando R2( ) de rstanarm
+# ——————————————————————————————————————————————————————————————
+
+library(rstanarm)
+
+# 1) Preparar datos (mismo clean_data_Q1 de tu notebook)
+clean_data_Q1 <- train_data %>%
+  filter(!is.na(age), !is.na(Q1)) %>%
+  mutate(Q1 = factor(Q1, levels = 1:5, ordered = TRUE))
+
+# 2) Definir dos R2-priors con ubicaciones (location) distintas:
+#    - El primer prior asume R² ≈ 0.2 (un modelo con poco "poder explicativo")
+#    - El segundo asume R² ≈ 0.8 (un modelo con alto "poder explicativo")
+#
+#    Como hay un solo predictor, usamos `what = "mean"` para basarnos en la media
+#    de la Beta(α,β) en lugar del modo (que no existe si α ≤ 1 o β ≤ 1).
+prior_r2_20 <- R2(location = 0.2, what = "mean")
+prior_r2_80 <- R2(location = 0.8, what = "mean")
+
+# 3) Ajustar dos modelos idénticos salvo el R2-prior:
+set.seed(2025)
+
+model_r2_20 <- stan_polr(
+  formula      = Q1 ~ age,
+  data         = clean_data_Q1,
+  prior        = prior_r2_20,
+  prior_intercept = NULL,   # dejamos el intercept default (cauchy(0, 10, autoscale=TRUE))
+  chains       = 2,
+  iter         = 2000,
+  seed         = 2025
+)
+
+model_r2_80 <- stan_polr(
+  formula      = Q1 ~ age,
+  data         = clean_data_Q1,
+  prior        = prior_r2_80,
+  prior_intercept = NULL,
+  chains       = 2,
+  iter         = 2000,
+  seed         = 2025
+)
+
+# 4) Extraer las muestras posteriores del coeficiente 'age'
+post_20 <- as.data.frame(as.matrix(model_r2_20, pars = "age"))
+colnames(post_20) <- "age"
+post_20$prior <- "R2(mean=0.2)"
+
+post_80 <- as.data.frame(as.matrix(model_r2_80, pars = "age"))
+colnames(post_80) <- "age"
+post_80$prior <- "R2(mean=0.8)"
+
+# 5) Unir para comparar y graficar densidades
+library(dplyr)
+posteriors_r2 <- bind_rows(post_20, post_80)
+
+library(ggplot2)
+ggplot(posteriors_r2, aes(x = age, color = prior, fill = prior)) +
+  geom_density(alpha = 0.3, size = 0.8) +
+  labs(
+    title = "Posterior de β (edad) con dos R2-priors distintos",
+    x     = expression(beta~"(edad)"),
+    y     = "Densidad"
+  ) +
+  theme_minimal()
+
+# 6) (Opcional) Intervalos de credibilidad para cada modelo
+ci_20 <- posterior_interval(model_r2_20, pars = "age", prob = 0.95)
+ci_80 <- posterior_interval(model_r2_80, pars = "age", prob = 0.95)
+
+cat("Intervalo 95% credibilidad para prior R2(mean=0.2):\n")
+print(ci_20)
+
+cat("\nIntervalo 95% credibilidad para prior R2(mean=0.8):\n")
+print(ci_80)
+
+```
+
+
 
