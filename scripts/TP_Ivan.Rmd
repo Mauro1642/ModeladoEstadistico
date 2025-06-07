@@ -220,7 +220,10 @@ ci_80 <- posterior_interval(model_r2_80, pars = "age", prob = 0.95)
 
 cat("Intervalo 95% credibilidad para prior R2(mean=0.2):\n")
 print(ci_20)
+```
 
+
+```{r}
 cat("\nIntervalo 95% credibilidad para prior R2(mean=0.8):\n")
 print(ci_80)
 
