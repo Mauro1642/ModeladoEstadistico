@@ -1,0 +1,204 @@
+---
+title: "TP2"
+output: html_document
+date: "2025-06-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r Datos}
+credits_train<-read.csv("~/TP2ModeladoEstadistico/TP2MODELADOESTADISTICO/credits_train.csv")
+titles_train<-read.csv("~/TP2ModeladoEstadistico/TP2MODELADOESTADISTICO/titles_train.csv")
+```
+```{r Visualizacion de generos vs score, echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+
+# 1. Si los géneros están como strings tipo "['Drama', 'Romance']":
+#    Primero limpiamos y separamos
+generos_limpio <- titles_train %>%
+  mutate(genres = str_remove_all(genres, "\\[|\\]|'")) %>%  # sacamos corchetes y comillas
+  separate_rows(genres, sep = ",\\s*")  # separamos por coma
+
+# 2. Agrupamos por género y calculamos el promedio de score
+promedios_genero <- generos_limpio %>%
+  group_by(genres) %>%
+  summarise(promedio_score = mean(imdb_score, na.rm = TRUE),
+            n = n()) %>%
+  arrange(desc(promedio_score))
+
+# 3. Visualizamos
+promedios_generos <- tibble(
+  genres = promedios_genero$genres,
+  promedio_score = promedios_genero$promedio_score
+)
+ggplot(promedios_genero, aes(x = reorder(genres, promedio_score), y = promedio_score)) + coord_flip() +
+  geom_col(fill = "steelblue") +
+  labs(title = "Score promedio de IMDb por género",
+       x = "Género", y = "Puntaje promedio") +
+  theme_minimal()
+
+
+```
+```{r Visualizacion actores/directores vs score, echo=FALSE}
+# 1. Unimos los datos por ID del título
+creditos_con_score <- credits_train %>%
+  left_join(titles_train %>% select(id, imdb_score), by = "id")
+
+# 2. Agrupamos por persona y calculamos el promedio de puntaje
+score_por_persona <- creditos_con_score %>%
+  group_by(name) %>%
+  summarise(
+    promedio_score = mean(imdb_score, na.rm = TRUE),
+    cantidad_titulos = n()
+  ) %>%
+  arrange(desc(promedio_score))
+score_por_persona %>%
+  slice_max(promedio_score, n = 10) %>%
+  ggplot(aes(x = reorder(name, promedio_score), y = promedio_score)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 15 personas por score promedio IMDb",
+       x = "Nombre", y = "Puntaje promedio") +
+  theme_minimal()
+
+```
+```{r Ejercicio 2}
+titles_train_clean <- titles_train %>% # Separar los países en filas distintas
+    # 1. Sacar corchetes iniciales y comillas
+  mutate(production_countries = str_remove_all(production_countries, "\\[|\\]")) %>%
+  
+  # 2. Separar en filas por coma
+  separate_rows(production_countries, sep = ",") %>%
+  
+  # 3. Quitar posibles espacios en blanco
+  mutate(production_countries = str_trim(production_countries)) %>%
+  
+  # 4. Volver a agregar corchetes y comillas alrededor de cada país
+  mutate(production_countries = paste0('["', production_countries, '"]'))
+  # Agrupar por país
+titles_por_country<- titles_train_clean %>% group_by("production_countries")
+```
+```{r Fixed Model}
+#a)
+titles_por_country$production_countries<-as.factor(titles_por_country$production_countries)
+modelo_fijo<-lm(imdb_score~production_countries,data=titles_por_country)
+coefs<-coef(modelo_fijo)
+vector_paises <- c()
+intercepto<-coefs["(Intercept)"]
+pais_base <- levels(titles_por_country$production_countries)[1]
+vector_paises[pais_base] <- intercepto
+# Agregar los demás países sumando el coeficiente al intercepto
+for (nombre in names(coefs)) {
+  if (nombre != "(Intercept)") {
+    # Extraer el nombre del país del término
+    pais <- gsub("production_countries", "", nombre)
+    vector_paises[pais] <- intercepto + coefs[nombre]
+  }
+}
+df_modelo_fijo <- data.frame(
+  coeficiente = as.numeric(vector_paises),
+  row.names = names(vector_paises)
+)
+df_modelo_fijo$modelo<-"modelo fijo"
+```
+```{r Random Model}
+#b)
+library(lme4)
+# Modelo de efectos aleatorios por país
+modelo_random <- lmer(imdb_score ~ 1 + (1 | production_countries), data = titles_por_country)
+df_modelo_aleatorio<-coef(modelo_random)$production_countries
+df_modelo_aleatorio$modelo<-"modelo aleatorio"
+
+```
+```{r Comparacion de modelos}
+df_modelo_fijo$pais <- rownames(df_modelo_fijo)
+df_modelo_aleatorio$pais <- rownames(df_modelo_aleatorio)
+ggplot() +
+  # Modelo de efectos fijos (azul)
+  geom_point(data = df_modelo_fijo,
+             aes(x = reorder(pais, coeficiente), y = coeficiente),
+             color = "#0072B2", size = 3, shape = 16) +
+  
+  # Modelo de efectos aleatorios (rojo)
+  geom_point(data = df_modelo_aleatorio,
+             aes(x = reorder(pais, `(Intercept)`), y = `(Intercept)`),
+             color = "#D55E00", size = 3, shape = 17) +
+  
+  coord_flip() +
+  labs(title = "Comparación de coeficientes por país",
+       x = "País",
+       y = "Coeficiente estimado (imdb_score)",
+       caption = "Azul: Modelo de efectos fijos | Rojo: Modelo de efectos aleatorios") +
+  theme_minimal()
+
+```
+```{r Splines Cubicos}
+library(splines)
+k_values <- c(20)
+#Necesitamos una columna de popularidad, para eso usamos un promedio ponderado de imdb_scores y imdb_votes
+titles_train$popularity<-titles_train$imdb_score*log(titles_train$imdb_votes+1)
+#Ahora usamos un modelo de splines cubicos
+# Variables
+x <- titles_train$release_year
+y <- titles_train$popularity
+
+# Grid de valores para predecir suavemente
+x_grid <- seq(min(x), max(x), length.out = 500)
+pred_df <- data.frame(release_year = x_grid)
+# Ajustar modelos spline para cada k y guardar predicciones
+for (k in k_values) {
+  # Generar knots internos equiespaciados
+  knots <- seq(min(x), max(x), length.out = k + 2)[-c(1, k + 2)]  # quitar extremos
+  
+  # Ajustar modelo spline cúbico sin penalización
+  model <- lm(y ~ bs(x, knots = knots, degree = 3), data = titles_train)
+  
+  # Predecir sobre el grid
+  pred_df[[paste0("k_", k)]] <- predict(model, newdata = data.frame(x = x_grid))
+}
+# Convertir a formato largo para ggplot
+pred_long <- pivot_longer(pred_df, cols = starts_with("k_"), names_to = "k", values_to = "popularity_pred")
+# Graficar resultados
+ggplot() +
+  geom_point(data = titles_train, aes(x = release_year, y = popularity), alpha = 0.3) +
+  geom_line(data = pred_long, aes(x = release_year, y = popularity_pred, color = k), size = 1) +
+  labs(title = "Popularidad predicha con splines cúbicos (λ = 0)",
+       x = "Año de lanzamiento", y = "Popularidad",
+       color = "Cantidad de nodos (k)") +
+  theme_minimal()
+```
+```{r Causalidad}
+#Criterio Backdoor: dado un par ordenado de variables (X,Y) en un DAG, un conjunto de variables Z satisface el criterio backdoor relativo a (X,Y) si ningun nodo en Z es un descendiente de X y Z bloquea todo camino de X a Y que contiene una flecha hacia X.
+```
+```{r Ejercicio 5}
+set.seed(123)
+k <- 5
+folds <- sample(rep(1:k, length.out = nrow(dataset)))
+errors <- numeric(k)
+
+for (i in 1:k) {
+  train_data <- titles_train[folds != i, ]
+  test_data  <- titles_train[folds == i, ]
+  
+  model <- lm(y ~ x1 + x2, data = train_data)
+  preds <- predict(model, newdata = test_data)
+  
+  errors[i] <- mean((test_data$y - preds)^2)  # MSE
+}
+
+mean(errors)
+
+```
+
+
