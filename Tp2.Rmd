@@ -123,23 +123,23 @@ df_modelo_aleatorio$modelo<-"modelo aleatorio"
 ```
 ```{r Comparacion de modelos}
 df_modelo_fijo$pais <- rownames(df_modelo_fijo)
+df_top10<-head(df_modelo_fijo,15)
 df_modelo_aleatorio$pais <- rownames(df_modelo_aleatorio)
+df_top10aleatorio<-head(df_modelo_aleatorio,15)
 ggplot() +
   # Modelo de efectos fijos (azul)
-  geom_point(data = df_modelo_fijo,
+  geom_point(data = df_top10,
              aes(x = reorder(pais, coeficiente), y = coeficiente),
              color = "#0072B2", size = 3, shape = 16) +
   
-  # Modelo de efectos aleatorios (rojo)
-  geom_point(data = df_modelo_aleatorio,
+  
+  geom_point(data = df_top10aleatorio,
              aes(x = reorder(pais, `(Intercept)`), y = `(Intercept)`),
              color = "#D55E00", size = 3, shape = 17) +
   
-  coord_flip() +
-  labs(title = "Comparación de coeficientes por país",
+  labs(title = "Comparacion de coeficientes entre modelos para 15 paises",
        x = "País",
-       y = "Coeficiente estimado (imdb_score)",
-       caption = "Azul: Modelo de efectos fijos | Rojo: Modelo de efectos aleatorios") +
+       y = "Coeficiente estimado") +
   theme_minimal()
 
 ```
@@ -183,22 +183,23 @@ ggplot() +
 ```
 ```{r Ejercicio 5}
 set.seed(123)
-k <- 5
-folds <- sample(rep(1:k, length.out = nrow(dataset)))
-errors <- numeric(k)
-
-for (i in 1:k) {
-  train_data <- titles_train[folds != i, ]
-  test_data  <- titles_train[folds == i, ]
-  
-  model <- lm(y ~ x1 + x2, data = train_data)
-  preds <- predict(model, newdata = test_data)
-  
-  errors[i] <- mean((test_data$y - preds)^2)  # MSE
-}
-
-mean(errors)
-
+df_dev<-merge(titles_train,credits_train,by="id")
+porc_entrenamiento<-0.7
+n <- nrow(df_dev)
+indices_entrenamiento <- sample(1:n, size = round(porc_entrenamiento * n))
+# División del dataset
+df_train <- df_dev[indices_entrenamiento, ]
+df_test  <- df_dev[-indices_entrenamiento, ]
+```
+```{r Modelo Lineal}
+df_train$character <- as.factor(df_train$character)
+df_train$genres <- as.factor(df_train$genres)
+df_train$production_countries <-as.factor(df_train$production_countries)
+df_test$character <- as.factor(df_test$character)
+df_test$genres <- as.factor(df_test$genres)
+df_test$production_countries <- as.factor(df_test$production_countries)
+modelo_lineal <- lm(imdb_score ~ character + genres + production_countries, data = df_tes)
+summary(modelo_actor_genero_pais)
 ```
 
 
